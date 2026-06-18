@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
+
+    <!-- CARD BIANCA CENTRATA -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/whiteCard"
+        android:layout_width="300dp"
+        android:layout_height="420dp"
+        android:minHeight="350dp"
+        app:cardBackgroundColor="#F5FFFFFF"
+        app:cardCornerRadius="60dp"
+        app:cardElevation="4dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        android:foreground="?android:attr/selectableItemBackground">
+
+        <!-- CONTENITORE VERTICALE PER ALLINEARE TUTTO -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:padding="40dp">
+            <!-- logo snap -->
+            <ImageView
+                android:id="@+id/logoIcon"
+                android:layout_width="180dp"
+                android:layout_height="130dp"
+                android:layout_marginTop="20dp"
+                app:srcCompat="@drawable/logo_snap_no_sfondo_removebg_preview" />
+            <!-- scritta snap -->
+            <ImageView
+                android:layout_width="200dp"
+                android:layout_height="100dp"
+                android:layout_marginTop="20dp"
+                app:srcCompat="@drawable/snap_no_sfondo" />
+
+            <TextView
+                android:layout_width="200dp"
+                android:layout_height="50dp"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="15dp"
+                android:text="THE APP THAT WILL\nHELP YOU AUT"
+                android:textAlignment="center"
+                android:textColor="#545050"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+    </androidx.cardview.widget.CardView>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
