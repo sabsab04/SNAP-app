@@ -1,4 +1,4 @@
-package com.example.snap // <-- Controlla sempre che sia il tuo pacchetto
+package com.example.snap
 
 import android.content.Intent
 import android.net.Uri

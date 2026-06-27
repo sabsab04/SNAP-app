@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/sfondolayoutlogin"
+    android:elevation="4dp"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Username"
+        android:textColor="#555555"
+        android:textStyle="bold" />
+
+    <EditText
+        android:id="@+id/etUsername"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:background="@android:drawable/editbox_background"
+        android:hint="Value"
+        android:textColorHint="#777777"
+        android:textColor="#000000"
+        android:padding="12dp"
+        android:inputType="text" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Livello Autismo"
+        android:textColor="#555555"
+        android:textStyle="bold" />
+
+    <Spinner
+        android:id="@+id/etLivelloAutismo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:background="@android:drawable/btn_dropdown"
+        android:padding="12dp" />
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Verbalità"
+        android:textColor="#555555"
+        android:textStyle="bold" />
+
+    <EditText
+        android:id="@+id/etVerbalita"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:background="@android:drawable/editbox_background"
+        android:hint="Value"
+        android:textColorHint="#777777"
+        android:textColor="#000000"
+        android:padding="12dp"
+        android:inputType="text" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Biografia"
+        android:textColor="#555555"
+        android:textStyle="bold" />
+
+    <EditText
+        android:id="@+id/etBiografiaUtente"
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:layout_marginBottom="24dp"
+        android:background="@android:drawable/editbox_background"
+        android:hint="Value"
+        android:textColorHint="#777777"
+        android:textColor="#000000"
+        android:padding="12dp"
+        android:gravity="top|start"
+        android:inputType="textMultiLine" />
+
+    <Button
+        android:id="@+id/btnRegistratiUtente"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:background="@drawable/drawablebottonesignin"
+        android:text="Registrati"
+        android:textAllCaps="false"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        app:backgroundTint="@null" />
+
+</LinearLayout>
