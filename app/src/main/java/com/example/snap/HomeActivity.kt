@@ -62,7 +62,17 @@ fun MainScreen()  {
         ) {
             composable("news") { NewsScreen() }
             composable("community") { CommunityScreen() }
-            composable("psicologi") { PsicologiScreen() }
+            composable("psicologi") { PsicologiScreen(navController = navController) }
+            composable("chat_detail/{destinatarioId}/{destinatarioNome}") { backStackEntry ->
+                val destId = backStackEntry.arguments?.getString("destinatarioId") ?: ""
+                val destNome = backStackEntry.arguments?.getString("destinatarioNome") ?: "Chat"
+
+                ChatDetailScreen(
+                    destinatarioId = destId,
+                    destinatarioNome = destNome,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
             composable("locale") { MapScreen() }
             composable(route = "profilo") {
                 ProfiloScreen(
@@ -189,20 +199,5 @@ fun NavBarItem(icon: ImageVector, label: String, onClick: () -> Unit) {
     }
 }
 
-// --- Le nostre sezioni ---
 
-
-@Composable
-fun PsicologiScreen() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text = "Sezione Psicologi")
-    }
-}
-
-@Composable
-fun MapScreen() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text = "Sezione Locale: Mappe")
-    }
-}
 

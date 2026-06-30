@@ -28,19 +28,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.storage.storage
+import kotlinx.coroutines.launch
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import java.util.UUID
+// Assicurati di avere importato i moduli corretti del tuo client Supabase:
+// import io.github.jan.supabase.postgrest.postgrest
+// import io.github.jan.supabase.storage.storage
 
-// Aggiungiamo 'imageUri' per salvare la vera foto
+@Serializable
 data class CommunityPost(
     val id: String = UUID.randomUUID().toString(),
-    val authorName: String,
-    val authorLevel: Int,
+    @SerialName("author_name") val authorName: String,
+    @SerialName("author_level") val authorLevel: Int,
     val title: String,
     val content: String,
-    val hasImage: Boolean = false,
-    val imageUri: Uri? = null, // <--- Memorizza la foto reale
-    val likesCount: Int = 0,
-    val isLikedByMe: Boolean = false
+    @SerialName("has_image") val hasImage: Boolean = false,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("author_avatar_url") val authorAvatarUrl: String? = null, // <--- La foto dell'autore
+    @SerialName("likes_count") val likesCount: Int = 0,
+    @Transient val isLikedByMe: Boolean = false
 )
 
 val SfondoCommunity = Color(0xFFE8F5E9)
@@ -48,31 +58,88 @@ val ColoreCardPost = Color(0xFFC5E1A5)
 
 @Composable
 fun CommunityScreen() {
-    val posts = remember {
-        mutableStateListOf(
-            CommunityPost(authorName = "Anna Bianchi", authorLevel = 2, title = "Consiglio routine serale", content = "Qualcuno ha strategie efficaci per gestire la transizione verso il sonno senza troppe crisi? Grazie!", hasImage = true, likesCount = 4),
-            CommunityPost(authorName = "Giulio Bruni", authorLevel = 1, title = "Integrazione scolastica", content = "Oggi primo giorno con il nuovo assistente all'autonomia, è andata benissimo!", hasImage = false, likesCount = 2)
-        )
+    val context = LocalContext.current
+    var posts by remember { mutableStateOf<List<CommunityPost>>(emptyList()) }
+    var isCreatingPost by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(true) }
+    var isUploading by remember { mutableStateOf(false) } // Stato per mostrare il caricamento durante l'invio del post
+
+    val scope = rememberCoroutineScope()
+
+    // 1. Scarica i post all'apertura
+    fun fetchPosts() {
+        scope.launch {
+            try {
+                // Sostituisci 'supabaseClient' con il tuo oggetto Supabase
+                val fetchedPosts = supabase.client.postgrest["community_posts"]
+                    .select()
+                    // Ordiniamo per data decrescente (i più nuovi in alto)
+                    .decodeList<CommunityPost>()
+                    .sortedByDescending { it.id }
+                posts = fetchedPosts
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                isLoading = false
+            }
+        }
     }
 
-    var isCreatingPost by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        fetchPosts()
+    }
 
-    BackHandler(enabled = isCreatingPost) { isCreatingPost = false }
+    BackHandler(enabled = isCreatingPost && !isUploading) { isCreatingPost = false }
 
     Box(modifier = Modifier.fillMaxSize().background(SfondoCommunity)) {
-        if (isCreatingPost) {
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = ColoreCardPost)
+            }
+        } else if (isCreatingPost) {
             CreatePostView(
+                isUploading = isUploading,
                 onBack = { isCreatingPost = false },
                 onPostCreated = { titolo, testo, fotoScelta ->
-                    posts.add(0, CommunityPost(
-                        authorName = "Tu (Utente)",
-                        authorLevel = 1,
-                        title = titolo,
-                        content = testo,
-                        imageUri = fotoScelta,
-                        hasImage = fotoScelta != null
-                    ))
-                    isCreatingPost = false
+                    scope.launch {
+                        isUploading = true
+                        try {
+                            var uploadedImageUrl: String? = null
+
+                            // 2. Se c'è una foto, la carichiamo prima nello Storage
+                            if (fotoScelta != null) {
+                                val inputStream = context.contentResolver.openInputStream(fotoScelta)
+                                val bytes = inputStream?.readBytes()
+
+                                if (bytes != null) {
+                                    val fileName = "${UUID.randomUUID()}.jpg"
+                                    supabase.client.storage["community_images"].upload(fileName, bytes)
+                                    // Otteniamo l'URL pubblico per poterla mostrare
+                                    uploadedImageUrl = supabase.client.storage["community_images"].publicUrl(fileName)
+                                }
+                            }
+
+                            // 3. Creiamo l'oggetto del post e lo mandiamo al database
+                            val newPost = CommunityPost(
+                                authorName = "Tu (Utente)",
+                                authorLevel = 1,
+                                title = titolo,
+                                content = testo,
+                                hasImage = uploadedImageUrl != null,
+                                imageUrl = uploadedImageUrl
+                            )
+
+                            supabase.client.postgrest["community_posts"].insert(newPost)
+
+                            // Ricarica la bacheca
+                            fetchPosts()
+                            isCreatingPost = false
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        } finally {
+                            isUploading = false
+                        }
+                    }
                 }
             )
         } else {
@@ -83,10 +150,31 @@ fun CommunityScreen() {
                     val index = posts.indexOfFirst { it.id == postId }
                     if (index != -1) {
                         val currentPost = posts[index]
-                        if (currentPost.isLikedByMe) {
-                            posts[index] = currentPost.copy(isLikedByMe = false, likesCount = currentPost.likesCount - 1)
-                        } else {
-                            posts[index] = currentPost.copy(isLikedByMe = true, likesCount = currentPost.likesCount + 1)
+                        scope.launch {
+                            try {
+                                val increment = if (currentPost.isLikedByMe) -1 else 1
+                                val newLikesCount = currentPost.likesCount + increment
+
+                                // Aggiorna graficamente subito per fluidità
+                                val updatedPosts = posts.toMutableList()
+                                updatedPosts[index] = currentPost.copy(
+                                    isLikedByMe = !currentPost.isLikedByMe,
+                                    likesCount = newLikesCount
+                                )
+                                posts = updatedPosts
+
+                                // Aggiorna sul database
+                                supabase.client.postgrest["community_posts"].update(
+                                    {
+                                        set("likes_count", newLikesCount)
+                                    }
+                                ) {
+                                    filter { eq("id", postId) }
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                // In caso di errore, si potrebbe annullare l'aggiornamento locale
+                            }
                         }
                     }
                 }
@@ -102,20 +190,52 @@ fun CommunityFeedView(
     onLikeToggle: (String) -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(posts, key = { it.id }) { post ->
-                PostCard(post = post, onLikeClick = { onLikeToggle(post.id) })
+
+        // SE NON CI SONO POST, MOSTRA UN MESSAGGIO AL CENTRO
+        if (posts.isEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(bottom = 100.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Default.ChatBubbleOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = Color.Gray
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Nessun post presente.",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.DarkGray
+                )
+                Text(
+                    text = "Sii il primo a scrivere nella community!",
+                    fontSize = 14.sp,
+                    color = Color.Gray
+                )
+            }
+        }
+        // ALTRIMENTI MOSTRA LA LISTA NORMALE
+        else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(top = 30.dp, bottom = 100.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(posts, key = { it.id }) { post ->
+                    PostCard(post = post, onLikeClick = { onLikeToggle(post.id) })
+                }
             }
         }
 
+        // TASTO PER AGGIUNGERE IL POST (sempre visibile)
         FloatingActionButton(
             onClick = onAddPostClick,
             containerColor = ColoreCardPost,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp)
+            modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 90.dp, end = 24.dp)
         ) {
             Icon(Icons.Default.Add, contentDescription = "Nuovo Post", tint = Color.Black)
         }
@@ -160,25 +280,15 @@ fun PostCard(post: CommunityPost, onLikeClick: () -> Unit) {
                 Text(text = post.title, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
                 Text(text = post.content, fontSize = 14.sp)
 
-                // MOSTRA LA FOTO VERA (Se presente)
-                if (post.imageUri != null) {
+                // Qui legge l'URL pubblico dal database e usa Coil per caricarlo!
+                if (post.imageUrl != null) {
                     Spacer(modifier = Modifier.height(12.dp))
                     AsyncImage(
-                        model = post.imageUri,
+                        model = post.imageUrl,
                         contentDescription = "Immagine caricata",
                         modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop // Taglia i bordi in eccesso per farla quadrata/rettangolare
+                        contentScale = ContentScale.Crop
                     )
-                }
-                // Altrimenti mostra la vecchia finta immagine grigia per i post di prova
-                else if (post.hasImage) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(12.dp)).background(Color.DarkGray),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Image, contentDescription = "Immagine", tint = Color.White, modifier = Modifier.size(48.dp))
-                    }
                 }
             }
         }
@@ -197,7 +307,7 @@ fun PostCard(post: CommunityPost, onLikeClick: () -> Unit) {
                 modifier = Modifier.background(buttonColor, CircleShape).size(32.dp)
             ) {
                 Icon(
-                    imageVector = if (post.isLikedByMe) Icons.Default.ThumbUp else Icons.Default.ThumbUp,
+                    imageVector = Icons.Default.ThumbUp,
                     contentDescription = "Mi Piace",
                     modifier = Modifier.size(16.dp),
                     tint = if (post.isLikedByMe) Color.White else Color.DarkGray
@@ -208,21 +318,18 @@ fun PostCard(post: CommunityPost, onLikeClick: () -> Unit) {
 }
 
 @Composable
-fun CreatePostView(onBack: () -> Unit, onPostCreated: (String, String, Uri?) -> Unit) {
+fun CreatePostView(isUploading: Boolean, onBack: () -> Unit, onPostCreated: (String, String, Uri?) -> Unit) {
     var titolo by remember { mutableStateOf("") }
     var contenuto by remember { mutableStateOf("") }
-
-    // Stato per salvare l'URI della foto vera presa dalla galleria
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
 
-    // IL MOTORE DELLA GALLERIA: Questo gestisce l'apertura in automatico e la sicurezza!
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
-        onResult = { uri -> selectedImageUri = uri } // Salva l'immagine quando l'utente la seleziona
+        onResult = { uri -> selectedImageUri = uri }
     )
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack, modifier = Modifier.padding(bottom = 16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(top = 30.dp, start = 16.dp, end = 16.dp)) {
+        TextButton(onClick = onBack, modifier = Modifier.padding(bottom = 16.dp), enabled = !isUploading) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Indietro", tint = Color.Black)
             Spacer(modifier = Modifier.width(8.dp))
             Text("Previous", color = Color.Black)
@@ -245,7 +352,8 @@ fun CreatePostView(onBack: () -> Unit, onPostCreated: (String, String, Uri?) -> 
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent
                     ),
-                    textStyle = LocalTextStyle.current.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    textStyle = LocalTextStyle.current.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                    enabled = !isUploading
                 )
 
                 OutlinedTextField(
@@ -258,10 +366,10 @@ fun CreatePostView(onBack: () -> Unit, onPostCreated: (String, String, Uri?) -> 
                         unfocusedContainerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent
-                    )
+                    ),
+                    enabled = !isUploading
                 )
 
-                // Se hai scelto un'immagine, ti fa vedere l'anteprima piccola nel form!
                 if (selectedImageUri != null) {
                     Box(modifier = Modifier.padding(vertical = 8.dp)) {
                         AsyncImage(
@@ -270,10 +378,10 @@ fun CreatePostView(onBack: () -> Unit, onPostCreated: (String, String, Uri?) -> 
                             modifier = Modifier.size(80.dp).clip(RoundedCornerShape(8.dp)),
                             contentScale = ContentScale.Crop
                         )
-                        // Tasto per rimuovere la foto se hai sbagliato
                         IconButton(
                             onClick = { selectedImageUri = null },
-                            modifier = Modifier.align(Alignment.TopEnd).background(Color.White, CircleShape).size(24.dp)
+                            modifier = Modifier.align(Alignment.TopEnd).background(Color.White, CircleShape).size(24.dp),
+                            enabled = !isUploading
                         ) {
                             Icon(Icons.Default.Close, contentDescription = "Rimuovi", modifier = Modifier.size(16.dp))
                         }
@@ -282,7 +390,6 @@ fun CreatePostView(onBack: () -> Unit, onPostCreated: (String, String, Uri?) -> 
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     ElevatedButton(
-                        // LANCIAMO LA GALLERIA QUI:
                         onClick = {
                             photoPickerLauncher.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -290,7 +397,8 @@ fun CreatePostView(onBack: () -> Unit, onPostCreated: (String, String, Uri?) -> 
                         },
                         colors = ButtonDefaults.elevatedButtonColors(
                             containerColor = if (selectedImageUri != null) Color(0xFF7CB342) else Color.White
-                        )
+                        ),
+                        enabled = !isUploading
                     ) {
                         Icon(
                             imageVector = if (selectedImageUri != null) Icons.Default.Check else Icons.Default.Image,
@@ -312,16 +420,20 @@ fun CreatePostView(onBack: () -> Unit, onPostCreated: (String, String, Uri?) -> 
         Button(
             onClick = {
                 if (titolo.isNotBlank() && contenuto.isNotBlank()) {
-                    // Inviamo il file della foto vera alla funzione
                     onPostCreated(titolo, contenuto, selectedImageUri)
                 }
             },
             modifier = Modifier.align(Alignment.CenterHorizontally).height(50.dp).width(150.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = ColoreCardPost)
+            colors = ButtonDefaults.buttonColors(containerColor = ColoreCardPost),
+            enabled = !isUploading
         ) {
-            Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Post", color = Color.Black, fontWeight = FontWeight.Bold)
+            if (isUploading) {
+                CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Post", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

@@ -67,6 +67,6 @@ class MainActivity : AppCompatActivity() {
                 // Chiudiamo la MainActivity in ogni caso
                 finish()
             }
-        }, 5000)
+        }, 3000)
     }
 }

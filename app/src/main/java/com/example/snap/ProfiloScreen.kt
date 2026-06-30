@@ -260,6 +260,8 @@ fun ProfiloScreen(
     }
 }
 
+
+
 // Componente per la singola riga
 @Composable
 fun ProfileCard(

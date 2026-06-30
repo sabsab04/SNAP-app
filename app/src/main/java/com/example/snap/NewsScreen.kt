@@ -8,7 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -16,8 +16,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.jan.supabase.postgrest.postgrest
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+// Assicurati di avere importato il client di Supabase (es. io.github.jan.supabase.postgrest.postgrest)
 
-
+// Aggiungiamo @Serializable per permettere a Supabase di mappare automaticamente il JSON
+@Serializable
 data class NewsArticle(
     val title: String,
     val source: String,
@@ -26,51 +31,54 @@ data class NewsArticle(
     val url: String
 )
 
-
-val fintaListaArticoli = listOf(
-    NewsArticle(
-        "L'importanza della diagnosi precoce",
-        "PubMed",
-        "Dr. Rossi, Dr. Bianchi",
-        "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor...",
-        "https://pubmed.ncbi.nlm.nih.gov/" // Link inserito qui
-    ),
-    NewsArticle(
-        "Nuovi studi sull'integrazione sensoriale",
-        "Journal of Autism",
-        "Dr.ssa Verdi",
-        "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor...",
-        "https://www.google.com" // Puoi mettere qualsiasi link
-    ),
-    NewsArticle(
-        "Supporto alle famiglie: linee guida",
-        "Ministero della Salute",
-        "Autori Vari",
-        "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor...",
-        "https://www.salute.gov.it"
-    )
-)
-
 @Composable
 fun NewsScreen() {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        items(fintaListaArticoli) { articolo ->
-            NewsCard(article = articolo)
+    // Stati per gestire la lista e il caricamento
+    var newsList by remember { mutableStateOf<List<NewsArticle>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+
+    // Chiamata al database quando si apre la schermata
+    LaunchedEffect(Unit) {
+        scope.launch {
+            try {
+
+                val articles = supabase.client.postgrest["news_articles"]
+                    .select()
+                    .decodeList<NewsArticle>()
+
+                newsList = articles
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                isLoading = false
+            }
         }
-        item { Spacer(modifier = Modifier.height(20.dp)) }
+    }
+
+    if (isLoading) {
+        // Schermata di caricamento mentre scarica i dati
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Color(0xFFFF8A80))
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            // Ho spostato il padding generale nei contentPadding per evitare che
+            // la lista venga tagliata in fondo durante lo scorrimento
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 30.dp, bottom = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            items(newsList) { articolo ->
+                NewsCard(article = articolo)
+            }
+        }
     }
 }
 
 @Composable
 fun NewsCard(article: NewsArticle) {
     val coloreIntestazione = Color(0xFFFF8A80)
-
-
     val context = LocalContext.current
 
     Card(
@@ -113,7 +121,6 @@ fun NewsCard(article: NewsArticle) {
                     horizontalArrangement = Arrangement.End
                 ) {
                     Button(
-
                         onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(article.url))
                             context.startActivity(intent)
