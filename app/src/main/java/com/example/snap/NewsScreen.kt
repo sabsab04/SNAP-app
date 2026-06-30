@@ -19,9 +19,7 @@ import androidx.compose.ui.unit.sp
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-// Assicurati di avere importato il client di Supabase (es. io.github.jan.supabase.postgrest.postgrest)
 
-// Aggiungiamo @Serializable per permettere a Supabase di mappare automaticamente il JSON
 @Serializable
 data class NewsArticle(
     val title: String,
@@ -32,17 +30,16 @@ data class NewsArticle(
 )
 
 @Composable
-fun NewsScreen() {
-    // Stati per gestire la lista e il caricamento
+// ECCO LA CORREZIONE: Ora la funzione accetta la parola cercata!
+fun NewsScreen(searchQuery: String = "") {
     var newsList by remember { mutableStateOf<List<NewsArticle>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
-    // Chiamata al database quando si apre la schermata
+    // Chiamata al database per scaricare tutte le news all'avvio
     LaunchedEffect(Unit) {
         scope.launch {
             try {
-
                 val articles = supabase.client.postgrest["news_articles"]
                     .select()
                     .decodeList<NewsArticle>()
@@ -56,20 +53,47 @@ fun NewsScreen() {
         }
     }
 
+    // Questa lista si aggiorna in tempo reale mentre scrivi nell'header
+    val filteredNews = if (searchQuery.isBlank()) {
+        newsList // Se non hai scritto niente, mostra tutto
+    } else {
+        newsList.filter { articolo ->
+            // Controlla se la parola cercata è nel titolo o nella descrizione (ignorando maiuscole)
+            articolo.title.contains(searchQuery, ignoreCase = true) ||
+                    articolo.description.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
     if (isLoading) {
-        // Schermata di caricamento mentre scarica i dati
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = Color(0xFFFF8A80))
         }
     } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            // Ho spostato il padding generale nei contentPadding per evitare che
-            // la lista venga tagliata in fondo durante lo scorrimento
+            // Aggiustato il padding superiore a 0 perché la navbar è separata
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 30.dp, bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(newsList) { articolo ->
+
+            // SE LA RICERCA NON TROVA NULLA, MOSTRA UN MESSAGGIO
+            if (filteredNews.isEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(top = 40.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Nessuna news trovata per '$searchQuery'",
+                            color = Color.Gray,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+            }
+
+            // CARICA LE CARD FILTRATE (invece di tutte)
+            items(filteredNews) { articolo ->
                 NewsCard(article = articolo)
             }
         }

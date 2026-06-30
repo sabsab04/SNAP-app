@@ -1,4 +1,4 @@
-package com.example.snap // <-- Controlla solo che questo sia il pacchetto giusto
+package com.example.snap
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -10,20 +10,30 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Newspaper
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import androidx.compose.material.icons.filled.*
-import androidx.compose.ui.graphics.vector.ImageVector
+import coil.compose.AsyncImage
+import io.github.jan.supabase.gotrue.auth
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
+import kotlinx.coroutines.launch
 
 class HomeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -42,17 +52,47 @@ class HomeActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen()  {
+fun MainScreen() {
     val navController = rememberNavController()
     val backgroundColor = Color(0xFFF1EEEE)
+    val coroutineScope = rememberCoroutineScope()
+
+    // --- VARIABILI DI STATO ---
+    var searchQuery by remember { mutableStateOf("") } // Testo della ricerca
+    var avatarUrl by remember { mutableStateOf<String?>(null) } // Link foto profilo
+
+    // --- CARICAMENTO AVATAR ALL'AVVIO ---
+    LaunchedEffect(Unit) {
+        try {
+            val userId = supabase.client.auth.currentUserOrNull()?.id
+            if (userId != null) {
+                // Scarica SOLO l'url della foto per essere super veloce
+                val profile = supabase.client.postgrest["profili"]
+                    .select(columns = Columns.list("avatar_url")) {
+                        filter { eq("id", userId) }
+                    }.decodeSingleOrNull<UserProfile>()
+
+                avatarUrl = profile?.avatarUrl
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor)
-            .systemBarsPadding() // <--- AGGIUNGI QUESTA RIGA QUI
+            .systemBarsPadding()
     ) {
-        CustomHeader(navController)
+        // SOSTITUITO: Usiamo la nuova barra interattiva
+        MainTopBar(
+            avatarUrl = avatarUrl,
+            searchQuery = searchQuery,
+            onSearchQueryChange = { searchQuery = it },
+            onProfileClick = { navController.navigate("profilo") }
+        )
+
         CustomNavBar(navController)
 
         NavHost(
@@ -60,7 +100,10 @@ fun MainScreen()  {
             startDestination = "news",
             modifier = Modifier.weight(1f)
         ) {
-            composable("news") { NewsScreen() }
+
+            composable("news") {
+                NewsScreen(searchQuery = searchQuery)
+            }
             composable("community") { CommunityScreen() }
             composable("psicologi") { PsicologiScreen(navController = navController) }
             composable("chat_detail/{destinatarioId}/{destinatarioNome}") { backStackEntry ->
@@ -76,58 +119,75 @@ fun MainScreen()  {
             composable("locale") { MapScreen() }
             composable(route = "profilo") {
                 ProfiloScreen(
-                    onNavigateBack = {navController.popBackStack()},
+                    onNavigateBack = { navController.popBackStack() },
                     onNavigateToEdit = { navController.navigate("modifica_profilo") }
                 )
             }
-
             composable(route = "modifica_profilo") {
                 ModificaProfiloScreen(
-                    onNavigateBack = { navController.popBackStack() } // Torna al profilo dopo aver salvato
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
         }
     }
 }
 
+// --- NUOVA BARRA HEADER ---
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CustomHeader(navController: NavHostController) {
+fun MainTopBar(
+    avatarUrl: String?,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onProfileClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 24.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // FOTO PROFILO
         Box(
             modifier = Modifier
                 .size(50.dp)
                 .clip(CircleShape)
                 .background(Color.Gray)
+                .clickable { onProfileClick() },
+            contentAlignment = Alignment.Center
         ) {
-            Button(
-                onClick = { navController.navigate("profilo") },
-                modifier = Modifier.fillMaxSize(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent)
-            ) {}
+            if (!avatarUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = avatarUrl,
+                    contentDescription = "Profilo",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(Icons.Outlined.Person, contentDescription = null, tint = Color.White)
+            }
         }
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        Box(
+        // BARRA DI RICERCA VERA
+        TextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            placeholder = { Text("Search...", color = Color.Gray) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Cerca", tint = Color.Gray) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color.White)
-                .padding(horizontal = 16.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Search, contentDescription = "Cerca", tint = Color.Gray)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Search", color = Color.Gray)
-            }
-        }
+                .height(50.dp)
+                .clip(RoundedCornerShape(24.dp)),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent
+            ),
+            singleLine = true
+        )
     }
 }
 
@@ -150,7 +210,6 @@ fun CustomNavBar(navController: NavHostController) {
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Usiamo la nostra funzione personalizzata per ogni tasto
         NavBarItem(
             icon = Icons.Filled.Newspaper,
             label = "News",
@@ -162,7 +221,7 @@ fun CustomNavBar(navController: NavHostController) {
             onClick = { navController.navigate("community") }
         )
         NavBarItem(
-            icon = Icons.Filled.Psychology, // Questa icona è perfetta per gli psicologi!
+            icon = Icons.Filled.Psychology,
             label = "Psicologi",
             onClick = { navController.navigate("psicologi") }
         )
@@ -176,11 +235,10 @@ fun CustomNavBar(navController: NavHostController) {
 
 @Composable
 fun NavBarItem(icon: ImageVector, label: String, onClick: () -> Unit) {
-    // Column mette l'icona sopra e il testo sotto
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .clickable { onClick() } // Rende cliccabile l'intera area
+            .clickable { onClick() }
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -198,6 +256,3 @@ fun NavBarItem(icon: ImageVector, label: String, onClick: () -> Unit) {
         )
     }
 }
-
-
-

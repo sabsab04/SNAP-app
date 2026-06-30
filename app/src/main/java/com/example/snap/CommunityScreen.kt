@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,29 +29,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import io.github.jan.supabase.gotrue.auth
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Transient
 import java.util.UUID
-// Assicurati di avere importato i moduli corretti del tuo client Supabase:
-// import io.github.jan.supabase.postgrest.postgrest
-// import io.github.jan.supabase.storage.storage
 
 @Serializable
 data class CommunityPost(
     val id: String = UUID.randomUUID().toString(),
+    @SerialName("author_id") val authorId: String? = null, // <--- Per riconoscere chi lo ha creato
     @SerialName("author_name") val authorName: String,
     @SerialName("author_level") val authorLevel: Int,
     val title: String,
     val content: String,
     @SerialName("has_image") val hasImage: Boolean = false,
     @SerialName("image_url") val imageUrl: String? = null,
-    @SerialName("author_avatar_url") val authorAvatarUrl: String? = null, // <--- La foto dell'autore
+    @SerialName("author_avatar_url") val authorAvatarUrl: String? = null,
     @SerialName("likes_count") val likesCount: Int = 0,
-    @Transient val isLikedByMe: Boolean = false
+    @SerialName("liked_by") val likedBy: List<String> = emptyList() // <--- Lista di chi ha messo like
 )
 
 val SfondoCommunity = Color(0xFFE8F5E9)
@@ -59,24 +59,38 @@ val ColoreCardPost = Color(0xFFC5E1A5)
 @Composable
 fun CommunityScreen() {
     val context = LocalContext.current
-    var posts by remember { mutableStateOf<List<CommunityPost>>(emptyList()) }
-    var isCreatingPost by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(true) }
-    var isUploading by remember { mutableStateOf(false) } // Stato per mostrare il caricamento durante l'invio del post
-
     val scope = rememberCoroutineScope()
 
-    // 1. Scarica i post all'apertura
-    fun fetchPosts() {
+    var posts by remember { mutableStateOf<List<CommunityPost>>(emptyList()) }
+    var currentUserProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var currentUserId by remember { mutableStateOf<String?>(null) }
+
+    var isCreatingPost by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(true) }
+    var isUploading by remember { mutableStateOf(false) }
+
+    fun fetchData() {
         scope.launch {
             try {
-                // Sostituisci 'supabaseClient' con il tuo oggetto Supabase
+                // A. RECUPERO ID UTENTE LOGGATO
+                val userId = supabase.client.auth.currentUserOrNull()?.id
+                currentUserId = userId
+
+                // B. SCARICA I POST
                 val fetchedPosts = supabase.client.postgrest["community_posts"]
                     .select()
-                    // Ordiniamo per data decrescente (i più nuovi in alto)
                     .decodeList<CommunityPost>()
                     .sortedByDescending { it.id }
                 posts = fetchedPosts
+
+                // C. SCARICA IL PROFILO DELL'UTENTE
+                if (userId != null) {
+                    currentUserProfile = supabase.client.postgrest["profili"]
+                        .select(columns = Columns.ALL) {
+                            filter { eq("id", userId) }
+                        }.decodeSingle<UserProfile>()
+                }
+
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
@@ -86,7 +100,7 @@ fun CommunityScreen() {
     }
 
     LaunchedEffect(Unit) {
-        fetchPosts()
+        fetchData()
     }
 
     BackHandler(enabled = isCreatingPost && !isUploading) { isCreatingPost = false }
@@ -106,7 +120,6 @@ fun CommunityScreen() {
                         try {
                             var uploadedImageUrl: String? = null
 
-                            // 2. Se c'è una foto, la carichiamo prima nello Storage
                             if (fotoScelta != null) {
                                 val inputStream = context.contentResolver.openInputStream(fotoScelta)
                                 val bytes = inputStream?.readBytes()
@@ -114,25 +127,31 @@ fun CommunityScreen() {
                                 if (bytes != null) {
                                     val fileName = "${UUID.randomUUID()}.jpg"
                                     supabase.client.storage["community_images"].upload(fileName, bytes)
-                                    // Otteniamo l'URL pubblico per poterla mostrare
                                     uploadedImageUrl = supabase.client.storage["community_images"].publicUrl(fileName)
                                 }
                             }
 
-                            // 3. Creiamo l'oggetto del post e lo mandiamo al database
+                            val nomeAutore = currentUserProfile?.Username
+                                ?: currentUserProfile?.NomeCognome
+                                ?: "Utente Sconosciuto"
+
+                            val livello = currentUserProfile?.Livelloautismo?.filter { it.isDigit() }?.toIntOrNull() ?: 1
+
+                            // CREAZIONE CON SALVATAGGIO ID AUTORE
                             val newPost = CommunityPost(
-                                authorName = "Tu (Utente)",
-                                authorLevel = 1,
+                                authorId = currentUserId, // Salviamo chi lo ha creato!
+                                authorName = nomeAutore,
+                                authorLevel = livello,
                                 title = titolo,
                                 content = testo,
                                 hasImage = uploadedImageUrl != null,
-                                imageUrl = uploadedImageUrl
+                                imageUrl = uploadedImageUrl,
+                                authorAvatarUrl = currentUserProfile?.avatarUrl
                             )
 
                             supabase.client.postgrest["community_posts"].insert(newPost)
 
-                            // Ricarica la bacheca
-                            fetchPosts()
+                            fetchData()
                             isCreatingPost = false
                         } catch (e: Exception) {
                             e.printStackTrace()
@@ -145,27 +164,50 @@ fun CommunityScreen() {
         } else {
             CommunityFeedView(
                 posts = posts,
+                currentUserId = currentUserId, // Passiamo l'ID corrente
                 onAddPostClick = { isCreatingPost = true },
+                onDeletePost = { postId ->
+                    scope.launch {
+                        try {
+                            // ELIMINA DA SUPABASE
+                            supabase.client.postgrest["community_posts"].delete { filter { eq("id", postId) } }
+                            // AGGIORNA INTERFACCIA
+                            posts = posts.filter { it.id != postId }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                },
                 onLikeToggle = { postId ->
                     val index = posts.indexOfFirst { it.id == postId }
-                    if (index != -1) {
+                    val userId = currentUserId
+                    if (index != -1 && userId != null) {
                         val currentPost = posts[index]
                         scope.launch {
                             try {
-                                val increment = if (currentPost.isLikedByMe) -1 else 1
-                                val newLikesCount = currentPost.likesCount + increment
+                                // CONTROLLA SE AVEVA GIA' MESSO LIKE
+                                val alreadyLiked = currentPost.likedBy.contains(userId)
 
-                                // Aggiorna graficamente subito per fluidità
+                                val newLikedBy = if (alreadyLiked) {
+                                    currentPost.likedBy - userId // Rimuove like
+                                } else {
+                                    currentPost.likedBy + userId // Aggiunge like
+                                }
+
+                                val newLikesCount = newLikedBy.size
+
+                                // AGGIORNA GRAFICAMENTE
                                 val updatedPosts = posts.toMutableList()
                                 updatedPosts[index] = currentPost.copy(
-                                    isLikedByMe = !currentPost.isLikedByMe,
+                                    likedBy = newLikedBy,
                                     likesCount = newLikesCount
                                 )
                                 posts = updatedPosts
 
-                                // Aggiorna sul database
+                                // AGGIORNA SUL DATABASE
                                 supabase.client.postgrest["community_posts"].update(
                                     {
+                                        set("liked_by", newLikedBy)
                                         set("likes_count", newLikesCount)
                                     }
                                 ) {
@@ -173,7 +215,6 @@ fun CommunityScreen() {
                                 }
                             } catch (e: Exception) {
                                 e.printStackTrace()
-                                // In caso di errore, si potrebbe annullare l'aggiornamento locale
                             }
                         }
                     }
@@ -186,52 +227,40 @@ fun CommunityScreen() {
 @Composable
 fun CommunityFeedView(
     posts: List<CommunityPost>,
+    currentUserId: String?,
     onAddPostClick: () -> Unit,
+    onDeletePost: (String) -> Unit,
     onLikeToggle: (String) -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
-
-        // SE NON CI SONO POST, MOSTRA UN MESSAGGIO AL CENTRO
         if (posts.isEmpty()) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(bottom = 100.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    Icons.Default.ChatBubbleOutline,
-                    contentDescription = null,
-                    modifier = Modifier.size(64.dp),
-                    tint = Color.Gray
-                )
+                Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.Gray)
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Nessun post presente.",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.DarkGray
-                )
-                Text(
-                    text = "Sii il primo a scrivere nella community!",
-                    fontSize = 14.sp,
-                    color = Color.Gray
-                )
+                Text("Nessun post presente.", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
+                Text("Sii il primo a scrivere nella community!", fontSize = 14.sp, color = Color.Gray)
             }
-        }
-        // ALTRIMENTI MOSTRA LA LISTA NORMALE
-        else {
+        } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                 contentPadding = PaddingValues(top = 30.dp, bottom = 100.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 items(posts, key = { it.id }) { post ->
-                    PostCard(post = post, onLikeClick = { onLikeToggle(post.id) })
+                    PostCard(
+                        post = post,
+                        currentUserId = currentUserId,
+                        onDeleteClick = { onDeletePost(post.id) },
+                        onLikeClick = { onLikeToggle(post.id) }
+                    )
                 }
             }
         }
 
-        // TASTO PER AGGIUNGERE IL POST (sempre visibile)
         FloatingActionButton(
             onClick = onAddPostClick,
             containerColor = ColoreCardPost,
@@ -243,20 +272,52 @@ fun CommunityFeedView(
 }
 
 @Composable
-fun PostCard(post: CommunityPost, onLikeClick: () -> Unit) {
+fun PostCard(post: CommunityPost, currentUserId: String?, onDeleteClick: () -> Unit, onLikeClick: () -> Unit) {
     val context = LocalContext.current
+
+    // Controlla se il mio ID è dentro la lista dei "mi piace" scaricata dal database
+    val isLikedByMe = currentUserId != null && post.likedBy.contains(currentUserId)
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.Gray))
+
+            Box(
+                modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.LightGray),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!post.authorAvatarUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = post.authorAvatarUrl,
+                        contentDescription = "Avatar Autore",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(Icons.Outlined.Person, contentDescription = null, tint = Color.White)
+                }
+            }
+
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = post.authorName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(text = "livello ${post.authorLevel}", fontSize = 12.sp, color = Color.DarkGray)
             }
+
+            // TASTO ELIMINA (Visibile solo se sei l'autore)
+            if (currentUserId != null && post.authorId == currentUserId) {
+                IconButton(
+                    onClick = onDeleteClick,
+                    modifier = Modifier.background(Color.White, CircleShape).size(36.dp)
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Elimina", tint = Color.Red, modifier = Modifier.size(20.dp))
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+
+            // TASTO CONDIVIDI
             IconButton(
                 onClick = {
                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
@@ -280,7 +341,6 @@ fun PostCard(post: CommunityPost, onLikeClick: () -> Unit) {
                 Text(text = post.title, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
                 Text(text = post.content, fontSize = 14.sp)
 
-                // Qui legge l'URL pubblico dal database e usa Coil per caricarlo!
                 if (post.imageUrl != null) {
                     Spacer(modifier = Modifier.height(12.dp))
                     AsyncImage(
@@ -301,7 +361,7 @@ fun PostCard(post: CommunityPost, onLikeClick: () -> Unit) {
             if (post.likesCount > 0) {
                 Text(text = post.likesCount.toString(), fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 6.dp))
             }
-            val buttonColor by animateColorAsState(targetValue = if (post.isLikedByMe) Color(0xFF7CB342) else ColoreCardPost, label = "")
+            val buttonColor by animateColorAsState(targetValue = if (isLikedByMe) Color(0xFF7CB342) else ColoreCardPost, label = "")
             IconButton(
                 onClick = onLikeClick,
                 modifier = Modifier.background(buttonColor, CircleShape).size(32.dp)
@@ -310,7 +370,7 @@ fun PostCard(post: CommunityPost, onLikeClick: () -> Unit) {
                     imageVector = Icons.Default.ThumbUp,
                     contentDescription = "Mi Piace",
                     modifier = Modifier.size(16.dp),
-                    tint = if (post.isLikedByMe) Color.White else Color.DarkGray
+                    tint = if (isLikedByMe) Color.White else Color.DarkGray
                 )
             }
         }
